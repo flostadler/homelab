@@ -1,0 +1,16 @@
+{
+    "name": "cluster",
+    "main": "index.ts",
+    "devDependencies": {
+        "@types/node": "^18",
+        "typescript": "^5.0.0"
+    },
+    "dependencies": {
+        "@pulumi/kubernetes": "^4.0.0",
+        "@pulumi/pulumi": "^3.113.0",
+        "@pulumi/cloudflare": "^5.43.0",
+        "@pulumi/command": "^1.0.1",
+        "@pulumiverse/talos": "^0.4.1",
+        "axios": "^1.7.7"
+    }
+}
