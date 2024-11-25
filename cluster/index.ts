@@ -79,7 +79,8 @@ const controlPlaneConfig = talos.machine.getConfigurationOutput({
             clusterName: fqClusterName,
             allowSchedulingOnControlPlanes: true,
             network: {
-                dnsDomain: `local.${fqClusterName}`,
+                // Pulumi Kubernetes operator doesn't support setting this yet
+                // dnsDomain: `local.${fqClusterName}`,
                 cni: {
                     name: "none",
                 }
@@ -178,7 +179,7 @@ const rookCeph = new storage.RookCeph("rook-ceph", {
     dependsOn: cilium,
     providers: [kube],
 })
-export const storageClass = rookCeph.storageClass;
+export const storageClass = rookCeph.storageClass.metadata.name;
 
 const pulumiOperatorVersion = config.require("pulumiOperatorVersion");
 const pulOperator = pulumiOperator.createOperator(pulumiOperatorVersion, {
@@ -190,6 +191,23 @@ export const pulumiStackNamespace = new k8s.core.v1.Namespace("pulumi-stacks", {
         name: "pulumi-stacks",
     },
 }, { provider: kube }).metadata.name;
+
+// feedback: It wasn't immediately clear why this is necessary. 
+const clusterRoleBinding = new k8s.rbac.v1.ClusterRoleBinding("pulumi-stacks-auth-delegator", {
+    metadata: {
+        name: "pulumi-stacks:default:system:auth-delegator",
+    },
+    roleRef: {
+        apiGroup: "rbac.authorization.k8s.io",
+        kind: "ClusterRole",
+        name: "system:auth-delegator",
+    },
+    subjects: [{
+        kind: "ServiceAccount",
+        namespace: pulumiStackNamespace,
+        name: "default",
+    }],
+}, { provider: kube });
 
 const accessToken = new k8s.core.v1.Secret("pulumi-access-token", {
     metadata: {
@@ -211,7 +229,7 @@ const stackOfStacks = new k8s.apiextensions.CustomResource("stack-of-stacks", {
     },
     spec: {
         stack: `${org}/lab-app-of-apps`,
-        projectRepo: "https://github.com/metral/test-s3-op-project",
+        projectRepo: "https://github.com/flostadler/homelab",
         repoDir: "app-of-apps",
         commit: "main",
         accessTokenSecret,
@@ -247,37 +265,3 @@ const certManager = new dns.CertManager("cert-manager", {
 });
 
 export const prodCertIssuer = certManager.prodIssuer.metadata.name;
-
-const ns = new k8s.core.v1.Namespace("podinfo", {
-    metadata: {
-        name: "podinfo",
-    },
-}, { provider: kube });
-const podInfo = new k8s.helm.v3.Release("podinfo", {
-    chart: "podinfo",
-    version: "6.7.1",
-    repositoryOpts: {
-        repo: "https://stefanprodan.github.io/podinfo",
-    },
-    namespace: ns.metadata.name,
-    values: {
-        ingress: {
-            enabled: "true",
-            className: "nginx",
-            annotations: {
-                "cert-manager.io/cluster-issuer": certManager.prodIssuer.metadata.name,
-            },
-            hosts: [{
-                host: `podinfo.apps.${fqClusterName}`,
-                paths: [{
-                    path: "/",
-                    pathType: "Prefix",
-                }],
-            }],
-            tls: [{
-                hosts: [`podinfo.apps.${fqClusterName}`],
-                secretName: `podinfo-tls`,
-            }],
-        },
-    },
-}, { provider: kube, dependsOn: [ingress, certManager, externalDns] });

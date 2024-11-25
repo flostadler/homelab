@@ -2,7 +2,7 @@ import * as pulumi from "@pulumi/pulumi";
 import * as k8s from "@pulumi/kubernetes";
 
 const org = pulumi.getOrganization();
-const stackRef = new pulumi.StackReference(`${org}/lab-cluster`)
+const stackRef = new pulumi.StackReference(`${org}/lab-cluster/lab-cluster`)
 const kubeconfig = stackRef.getOutput("kubeconfig");
 const prodCertIssuer = stackRef.getOutput("prodCertIssuer");
 const fqClusterName = stackRef.getOutput("fqClusterName");
