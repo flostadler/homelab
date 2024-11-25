@@ -232,7 +232,7 @@ const stackOfStacks = new k8s.apiextensions.CustomResource("stack-of-stacks", {
         stack: `${org}/lab-app-of-apps`,
         projectRepo: "https://github.com/flostadler/homelab",
         repoDir: "app-of-apps",
-        commit: "refs/heads/main",
+        branch: "refs/heads/main",
         accessTokenSecret,
         destroyOnFinalize: true,
     }
