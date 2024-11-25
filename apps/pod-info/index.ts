@@ -28,14 +28,14 @@ const podInfo = new k8s.helm.v3.Release("podinfo", {
                 "cert-manager.io/cluster-issuer": prodCertIssuer,
             },
             hosts: [{
-                host: `podinfo.apps.${fqClusterName}`,
+                host: pulumi.interpolate`podinfo.apps.${fqClusterName}`,
                 paths: [{
                     path: "/",
                     pathType: "Prefix",
                 }],
             }],
             tls: [{
-                hosts: [`podinfo.apps.${fqClusterName}`],
+                hosts: [pulumi.interpolate`podinfo.apps.${fqClusterName}`],
                 secretName: `podinfo-tls`,
             }],
         },

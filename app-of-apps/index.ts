@@ -8,7 +8,7 @@ const stackNamespace = stackRef.getOutput("pulumiStackNamespace");
 const accessTokenSecret = stackRef.getOutput("accessTokenSecret");
 const kube = new k8s.Provider("lab-cluster", { kubeconfig });
 
-const podInfo = new k8s.apiextensions.CustomResource("stack-of-stacks", {
+const podInfo = new k8s.apiextensions.CustomResource("pod-info", {
     apiVersion: 'pulumi.com/v1',
     kind: 'Stack',
     metadata: {
