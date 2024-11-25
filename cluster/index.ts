@@ -221,6 +221,7 @@ const accessToken = new k8s.core.v1.Secret("pulumi-access-token", {
 export const accessTokenSecret = accessToken.metadata.name;
 
 const org = pulumi.getOrganization();
+// Do I need to select refs/heads/main here?
 const stackOfStacks = new k8s.apiextensions.CustomResource("stack-of-stacks", {
     apiVersion: 'pulumi.com/v1',
     kind: 'Stack',
@@ -231,7 +232,7 @@ const stackOfStacks = new k8s.apiextensions.CustomResource("stack-of-stacks", {
         stack: `${org}/lab-app-of-apps`,
         projectRepo: "https://github.com/flostadler/homelab",
         repoDir: "app-of-apps",
-        commit: "main",
+        commit: "refs/heads/main",
         accessTokenSecret,
         destroyOnFinalize: true,
     }
