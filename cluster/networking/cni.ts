@@ -2,11 +2,13 @@ import * as pulumi from "@pulumi/pulumi";
 import * as k8s from "@pulumi/kubernetes";
 
 export interface CiliumConfig {
-    version: string;
+    version: pulumi.Input<string>;
+    floatingIPs: pulumi.Input<pulumi.Input<string>[]>;
+    nodeIPs: pulumi.Input<pulumi.Input<string>[]>;
 }
 
 export function installCni(name: string, config: CiliumConfig, opts: pulumi.CustomResourceOptions): k8s.helm.v3.Release {
-    return new k8s.helm.v3.Release(name, {
+    const release = new k8s.helm.v3.Release(name, {
         chart: "cilium",
         namespace: "kube-system",
         repositoryOpts: {
@@ -67,7 +69,27 @@ export function installCni(name: string, config: CiliumConfig, opts: pulumi.Cust
             hostFirewall: {
                 enabled: true,
             },
+            // nodeIPAM: {
+            //     enabled: true,
+            // }
+            // nodePort: {
+            //     addresses: config.nodeIPs,
+            // }
         },
-        version: "1.16.4",
+        version: config.version,
     }, opts);
+
+    const loadBalancerIPAM = new k8s.apiextensions.CustomResource(`${name}-load-balancer-ipam`, {
+        apiVersion: "cilium.io/v2alpha1",
+        kind: "CiliumLoadBalancerIPPool",
+        metadata: {
+            namespace: "kube-system",
+            name: "floating-ip",
+        },
+        spec: {
+            blocks: pulumi.output(config.floatingIPs).apply(ips => ips.map(ip => ({ cidr: ip }))),
+        }
+    }, { ...opts, dependsOn: release });
+
+    return release;
 }

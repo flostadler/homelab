@@ -16,6 +16,7 @@ export interface NodeProps {
     machineSecrets: talos.machine.Secrets;
     machineConfiguration: pulumi.Output<talos.machine.GetConfigurationResult>;
     zone: pulumi.Input<string>;
+    floatingIP?: pulumi.Input<string>;
 }
 
 export class ClusterNode extends pulumi.ComponentResource {
@@ -72,14 +73,31 @@ reboot
             node: args.ip,
             configPatches: [pulumi.jsonStringify({
                 machine: {
+                    kubelet: {
+                        nodeIP: {
+                            validSubnets: [pulumi.interpolate`${args.ip}/32`],
+                        }
+                    },
                     network: {
                         hostname: args.name,
+                        interfaces: [{
+                            deviceSelector: {
+                                busPath: "0*"
+                            },
+                            addresses: args.floatingIP ? [args.floatingIP] : undefined,
+                            dhcp: true,
+                        }]
                     },
                     nodeLabels: {
                         "topology.kubernetes.io/zone": args.zone,
                         "topology.kubernetes.io/region": pulumi.output(args.zone).apply(zone => zone.split("-")[0]),
                     }
                 },
+                cluster: {
+                    etcd: {
+                        advertisedSubnets: [pulumi.interpolate`${args.ip}/32`]
+                    }
+                }
             })],
         }, { parent: this, dependsOn: [dnsRecord, bootstrap] });
 

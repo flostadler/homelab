@@ -5,11 +5,15 @@ import * as k8s from "@pulumi/kubernetes";
 import * as nodes from "./nodes";
 import * as networking from './networking'
 import * as kubeUtils from './kubernetes'
+import * as pulumiOperator from "./pulumi";
+import * as dns from "./dns";
+import * as storage from "./storage";
 
 export interface NodeConfig {
     ip: string,
     name: string,
     zone: string,
+    floatingIP?: string,
 }
 
 export interface CloudflareConfig {
@@ -20,6 +24,7 @@ export interface CloudflareConfig {
 const config = new pulumi.Config();
 
 const talosVersion = config.require("talosVersion");
+const talosControllerManagerVersion = config.require("talosControllerManagerVersion");
 const kubernetesVersion = config.require("kubernetesVersion");
 
 const nodeConfig = config.requireObject<NodeConfig[]>("nodes");
@@ -36,7 +41,7 @@ const parentZone = cloudflare.getZoneOutput({
 }, { provider: cf });
 
 const clusterName = "lab";
-const fqClusterName = `${clusterName}.${parentDomain}`;
+export const fqClusterName = `${clusterName}.${parentDomain}`;
 const clusterHostname = `cluster.${fqClusterName}`
 const clusterEndpoint = `https://${clusterHostname}:6443`;
 
@@ -57,6 +62,18 @@ const controlPlaneConfig = talos.machine.getConfigurationOutput({
             install: {
                 disk: "/dev/nvme0n1",
             },
+            kubelet: {
+                extraArgs: {
+                    "cloud-provider": "external",
+                }
+            },
+            features: {
+                kubernetesTalosAPIAccess: {
+                    enabled: true,
+                    allowedRoles: ["os:reader"],
+                    allowedKubernetesNamespaces: ["kube-system"],
+                }
+            }
         },
         cluster: {
             clusterName: fqClusterName,
@@ -70,6 +87,10 @@ const controlPlaneConfig = talos.machine.getConfigurationOutput({
             proxy: {
                 disabled: true,
             },
+            externalCloudProvider: {
+                enabled: true,
+                manifests: [`https://raw.githubusercontent.com/siderolabs/talos-cloud-controller-manager/${talosControllerManagerVersion}/docs/deploy/cloud-controller-manager.yml`]
+            }
         },
     })],
 });
@@ -84,6 +105,7 @@ const clusterNodes = nodeConfig.map((node) => {
         zoneId: parentZone.zoneId,
         machineConfiguration: controlPlaneConfig,
         zone: node.zone,
+        floatingIP: node.floatingIP,
     }, { providers: {
         cloudflare: cf,
     } });
@@ -104,8 +126,10 @@ const bootstrap = new talos.machine.Bootstrap("bootstrap", {
     clientConfiguration: secrets.clientConfiguration,
 });
 
-const apiServerHealthy = pulumi.output(kubeUtils.checkApiServerHealth({
-    url: clusterEndpoint,
+const bootstrapEndpoint = pulumi.interpolate`https://${bootstrap.node}:6443`;
+const apiServerHealthy = bootstrapEndpoint.apply(endpoint => kubeUtils.checkApiServerHealth({
+    // check the floating IP, when bootstrapping this will be the only API server
+    url: endpoint,
     retryConfig: {
         maxTimeout: 30 * 1000 * 60, // 30 minutes
     }
@@ -116,6 +140,10 @@ export const kubeconfig = apiServerHealthy.apply(_ => {
         clientConfiguration: secrets.clientConfiguration,
         node: bootstrap.node,
     }).kubeconfigRaw;
+});
+
+const bootstrapKubeConfig = pulumi.all([kubeconfig, bootstrapEndpoint]).apply(([kubeconfig, endpoint]) => {
+    return kubeconfig.replace(clusterEndpoint, endpoint);
 });
 
 export const talosconfig = apiServerHealthy.apply(_ => {
@@ -130,13 +158,126 @@ export const talosconfig = apiServerHealthy.apply(_ => {
 // kubeconfig retrieved from Talos keeps on changing. We should only need to use a new kubeconfig if the talos machine
 // secrets change, but I'm too lazy right now to manually assemble the config.
 const kube = new k8s.Provider("k8s", {
-    kubeconfig,
+    kubeconfig: bootstrapKubeConfig,
 });
 
-const cilium = networking.installCni("cilium", { version: "1.16.4" }, { provider: kube });
-const firewall = networking.createControlPlaneHostFirewall("host-fw-control-plane", clusterNodes.map(n => n.ip), { provider: kube })
+const cilium = networking.installCni("cilium", {
+    version: "1.16.4",
+    floatingIPs: [...new Set(nodeConfig.map(n => n.floatingIP).filter(x => x !== undefined))],
+    nodeIPs: clusterNodes.map(n => pulumi.interpolate`${n.ip}/32`),
+}, { provider: kube });
+const firewall = networking.createControlPlaneHostFirewall("host-fw-control-plane", clusterNodes.map(n => n.ip), {
+    provider: kube,
+    dependsOn: cilium,
+});
 
-// todo add cert manager
-// todo add gateway API with a cert
-// add gateway for internal tools (e.g. grafana)
-// add gateway for services
+const rookCeph = new storage.RookCeph("rook-ceph", {
+    version: "v1.15.6",
+    cephVersion: "v19.2.0",
+}, {
+    dependsOn: cilium,
+    providers: [kube],
+})
+export const storageClass = rookCeph.storageClass;
+
+const pulumiOperatorVersion = config.require("pulumiOperatorVersion");
+const pulOperator = pulumiOperator.createOperator(pulumiOperatorVersion, {
+    provider: kube,
+    dependsOn: cilium,
+});
+export const pulumiStackNamespace = new k8s.core.v1.Namespace("pulumi-stacks", {
+    metadata: {
+        name: "pulumi-stacks",
+    },
+}, { provider: kube }).metadata.name;
+
+const accessToken = new k8s.core.v1.Secret("pulumi-access-token", {
+    metadata: {
+        name: "pulumi-access-token",
+        namespace: pulumiStackNamespace,
+    },
+    stringData: {
+        accessToken: config.require("pulumiToken"),
+    },
+}, { provider: kube });
+export const accessTokenSecret = accessToken.metadata.name;
+
+const org = pulumi.getOrganization();
+const stackOfStacks = new k8s.apiextensions.CustomResource("stack-of-stacks", {
+    apiVersion: 'pulumi.com/v1',
+    kind: 'Stack',
+    metadata: {
+        namespace: pulumiStackNamespace,
+    },
+    spec: {
+        stack: `${org}/lab-app-of-apps`,
+        projectRepo: "https://github.com/metral/test-s3-op-project",
+        repoDir: "app-of-apps",
+        commit: "main",
+        accessTokenSecret,
+        destroyOnFinalize: true,
+    }
+}, { provider: kube, dependsOn: [pulOperator] });
+
+const ingress = networking.installIngress("ingress-nginx", {
+    version: "4.11.3",
+    externalIps: clusterNodes.map(n => n.ip),
+}, {
+    provider: kube,
+    dependsOn: [cilium, firewall]
+});
+
+const externalDns = new dns.ExternalDns("external-dns", {
+    version: "1.15.0",
+    cloudflareAccountId: cloudflareCfg.account,
+    clusterName,
+    parentDomains: [parentDomain],
+}, {
+    providers: [cf, kube],
+    dependsOn: [cilium, firewall],
+});
+
+const certManager = new dns.CertManager("cert-manager", {
+    version: "1.16.2",
+    contact: "flo.stadler@gmx.net",
+    ingressClass: "nginx",
+}, {
+    providers: [kube],
+    dependsOn: [ingress],
+});
+
+export const prodCertIssuer = certManager.prodIssuer.metadata.name;
+
+const ns = new k8s.core.v1.Namespace("podinfo", {
+    metadata: {
+        name: "podinfo",
+    },
+}, { provider: kube });
+const podInfo = new k8s.helm.v3.Release("podinfo", {
+    chart: "podinfo",
+    version: "6.7.1",
+    repositoryOpts: {
+        repo: "https://stefanprodan.github.io/podinfo",
+    },
+    namespace: ns.metadata.name,
+    values: {
+        ingress: {
+            enabled: "true",
+            className: "nginx",
+            annotations: {
+                "cert-manager.io/cluster-issuer": certManager.prodIssuer.metadata.name,
+            },
+            hosts: [{
+                host: `podinfo.apps.${fqClusterName}`,
+                paths: [{
+                    path: "/",
+                    pathType: "Prefix",
+                }],
+            }],
+            tls: [{
+                hosts: [`podinfo.apps.${fqClusterName}`],
+                secretName: `podinfo-tls`,
+            }],
+        },
+    },
+}, { provider: kube, dependsOn: [ingress, certManager, externalDns] });

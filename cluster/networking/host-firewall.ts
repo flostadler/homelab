@@ -137,7 +137,18 @@ export function createControlPlaneHostFirewall(name: string, nodeIps: pulumi.Inp
                             { type: "128", family: "IPv6" },
                         ]
                     }]
-                }
+                },
+                {
+                    fromEntities: ["world", "cluster"],
+                    toPorts: [
+                        {
+                            ports: [
+                                { port: "80", protocol: "TCP" },
+                                { port: "443", protocol: "TCP" },
+                            ],
+                        },
+                    ],
+                },
             ],
         },
     }, opts);
