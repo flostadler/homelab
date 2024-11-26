@@ -112,4 +112,4 @@ const grafana = new k8s.helm.v3.Release("grafana", {
     },
     values: grafanaValues,
     namespace: ns.metadata.name,
-});
+}, { provider: kube });
