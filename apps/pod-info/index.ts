@@ -21,7 +21,20 @@ const podInfo = new k8s.helm.v3.Release("podinfo", {
     },
     namespace: ns.metadata.name,
     values: {
-        replicaCount: 2,
+        hpa: {
+            enabled: true,
+            cpu: "50",
+        },
+        resources: {
+            requests: {
+                cpu: "10m",
+                memory: "500Mi",
+            },
+            limits: {
+                cpu: "500m",
+                memory: "500Mi",
+            },
+        },
         ingress: {
             enabled: "true",
             className: "nginx",

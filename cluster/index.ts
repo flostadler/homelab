@@ -8,6 +8,7 @@ import * as kubeUtils from './kubernetes'
 import * as pulumiOperator from "./pulumi";
 import * as dns from "./dns";
 import * as storage from "./storage";
+import * as metrics from "./metrics";
 
 export interface NodeConfig {
     ip: string,
@@ -129,7 +130,7 @@ const bootstrap = new talos.machine.Bootstrap("bootstrap", {
 
 const bootstrapEndpoint = pulumi.interpolate`https://${bootstrap.node}:6443`;
 const apiServerHealthy = bootstrapEndpoint.apply(endpoint => kubeUtils.checkApiServerHealth({
-    // check the floating IP, when bootstrapping this will be the only API server
+    // check the IP of the bootstrap node, when bootstrapping this will be the only API server
     url: endpoint,
     retryConfig: {
         maxTimeout: 30 * 1000 * 60, // 30 minutes
@@ -170,6 +171,13 @@ const cilium = networking.installCni("cilium", {
 const firewall = networking.createControlPlaneHostFirewall("host-fw-control-plane", clusterNodes.map(n => n.ip), {
     provider: kube,
     dependsOn: cilium,
+});
+
+const metricsServer = new metrics.MetricsServer("metrics-server", {
+    version: "v3.12.2",
+}, {
+    providers: [kube],
+    dependsOn: [cilium],
 });
 
 const rookCeph = new storage.RookCeph("rook-ceph", {
@@ -221,7 +229,6 @@ const accessToken = new k8s.core.v1.Secret("pulumi-access-token", {
 export const accessTokenSecret = accessToken.metadata.name;
 
 const org = pulumi.getOrganization();
-// Do I need to select refs/heads/main here?
 const stackOfStacks = new k8s.apiextensions.CustomResource("stack-of-stacks", {
     apiVersion: 'pulumi.com/v1',
     kind: 'Stack',
