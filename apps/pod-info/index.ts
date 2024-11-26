@@ -23,11 +23,11 @@ const podInfo = new k8s.helm.v3.Release("podinfo", {
     values: {
         hpa: {
             enabled: true,
-            cpu: "50",
+            cpu: "90",
         },
         resources: {
             requests: {
-                cpu: "10m",
+                cpu: "100m",
                 memory: "500Mi",
             },
             limits: {
