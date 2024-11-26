@@ -100,6 +100,7 @@ const grafanaValues = {
                 memory: "512Mi",
             },
         },
+        adminPassword: "DUMMY",
     },
 };
 
