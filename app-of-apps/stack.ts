@@ -31,6 +31,7 @@ export function pulumiStack(stack: StackInfo) {
             commit: stack.commit,
             accessTokenSecret: accessTokenSecret,
             destroyOnFinalize: true,
+            continueResyncOnCommitMatch: true,
         }
     }, { provider: kube });
 }
