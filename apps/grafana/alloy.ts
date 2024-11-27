@@ -118,7 +118,7 @@ export class Alloy extends pulumi.ComponentResource {
                             prometheus.exporter.unix "os_metrics" { }
                             prometheus.scrape "os_metrics" {
                                 clustering {
-                                    enabled = true
+                                    enabled = false
                                 }
                                 targets    = prometheus.exporter.unix.os_metrics.targets
                                 forward_to = [prometheus.remote_write.metrics.receiver]
