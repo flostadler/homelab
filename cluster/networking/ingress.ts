@@ -36,6 +36,13 @@ export function installIngress(name: string, config: IngressConfig,  opts: pulum
                 },
                 publishService: {
                     enabled: true
+                },
+                metrics: {
+                    enabled: true
+                },
+                podAnnotations: {
+                    "prometheus.io/scrape": "true",
+                    "prometheus.io/port": "10254"
                 }
             }
         },

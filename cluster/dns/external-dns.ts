@@ -74,7 +74,10 @@ export class ExternalDns extends pulumi.ComponentResource {
                             key: "apiKey",
                         }
                     }
-                }]
+                }],
+                serviceMonitor: {
+                    enabled: true,
+                },
             },
             version: config.version,
         }, { parent: this });

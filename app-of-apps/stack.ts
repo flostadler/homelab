@@ -27,6 +27,7 @@ export function pulumiStack(stack: StackInfo) {
             projectRepo: "https://github.com/flostadler/homelab",
             repoDir: stack.repoDir,
             branch: stack.commit ? undefined : stack.branch ?? "refs/heads/main",
+            resyncFrequencySeconds: 60,
             commit: stack.commit,
             accessTokenSecret: accessTokenSecret,
             destroyOnFinalize: true,

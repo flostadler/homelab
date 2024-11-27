@@ -163,6 +163,18 @@ const kube = new k8s.Provider("k8s", {
     kubeconfig: bootstrapKubeConfig,
 });
 
+const crdUrls = [
+    "monitoring.coreos.com_servicemonitors.yaml",
+    "monitoring.coreos.com_podmonitors.yaml", 
+    "monitoring.coreos.com_probes.yaml",
+].map(crd => `https://raw.githubusercontent.com/prometheus-operator/prometheus-operator/main/example/prometheus-operator-crd/${crd}`);
+
+const promCRDs = crdUrls.map((url, index) => {
+    return new k8s.yaml.ConfigFile(`prometheus-crd-${index}`, {
+        file: url
+    }, { provider: kube });
+});
+
 const cilium = networking.installCni("cilium", {
     version: "1.16.4",
     floatingIPs: [...new Set(nodeConfig.map(n => n.floatingIP).filter(x => x !== undefined))],
@@ -187,7 +199,10 @@ const rookCeph = new storage.RookCeph("rook-ceph", {
     dependsOn: cilium,
     providers: [kube],
 })
-export const storageClass = rookCeph.storageClass.metadata.name;
+export const blockStorageClass = rookCeph.blockStorageClass.metadata.name;
+export const fileStorageClass = rookCeph.fileStorageClass.metadata.name;
+export const objectStore = rookCeph.objectStore.metadata.name;
+export const bucketStorageClass = rookCeph.bucketStorageClass.metadata.name;
 
 const pulumiOperatorVersion = config.require("pulumiOperatorVersion");
 const pulOperator = pulumiOperator.createOperator(pulumiOperatorVersion, {
@@ -240,6 +255,7 @@ const stackOfStacks = new k8s.apiextensions.CustomResource("stack-of-stacks", {
         projectRepo: "https://github.com/flostadler/homelab",
         repoDir: "app-of-apps",
         branch: "refs/heads/main",
+        resyncFrequencySeconds: 60,
         accessTokenSecret,
         destroyOnFinalize: true,
     }
@@ -260,7 +276,7 @@ const externalDns = new dns.ExternalDns("external-dns", {
     parentDomains: [parentDomain],
 }, {
     providers: [cf, kube],
-    dependsOn: [cilium, firewall],
+    dependsOn: [cilium, firewall, ...promCRDs],
 });
 
 const certManager = new dns.CertManager("cert-manager", {

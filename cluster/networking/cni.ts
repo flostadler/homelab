@@ -20,6 +20,9 @@ export function installCni(name: string, config: CiliumConfig, opts: pulumi.Cust
                 enabled: true,
                 type: "wireguard",
             },
+            prometheus: {
+                enabled: true,
+            },
             kubeProxyReplacement: true,
             k8sServiceHost: "localhost",
             k8sServicePort: "7445",
@@ -28,6 +31,9 @@ export function installCni(name: string, config: CiliumConfig, opts: pulumi.Cust
             },
             operator: {
                 rollOutPods: true,
+                prometheus: {
+                    enabled: true,
+                },
             },
             gatewayAPI: {
                 enabled: true,
@@ -69,6 +75,20 @@ export function installCni(name: string, config: CiliumConfig, opts: pulumi.Cust
             hostFirewall: {
                 enabled: true,
             },
+            hubble: {
+                metrics: {
+                    enableOpenMetrics: true,
+                    enabled: [
+                        "dns",
+                        "drop",
+                        "tcp",
+                        "flow",
+                        "port-distribution",
+                        "icmp",
+                        "httpV2:exemplars=true;labelsContext=source_ip,source_namespace,source_workload,destination_ip,destination_namespace,destination_workload,traffic_direction"
+                    ]
+                }
+            }
             // nodeIPAM: {
             //     enabled: true,
             // }
