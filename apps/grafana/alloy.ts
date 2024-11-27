@@ -50,9 +50,6 @@ export class Alloy extends pulumi.ComponentResource {
                             }
                             discovery.kubernetes "services" {
                                 role = "service"
-                                namespaces {
-                                    names = ["kube-system"]
-                                }
                             }
                             discovery.relabel "metrics" {
                                 targets = discovery.kubernetes.pods.targets
