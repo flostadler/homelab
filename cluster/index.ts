@@ -14,7 +14,6 @@ export interface NodeConfig {
     ip: string,
     name: string,
     zone: string,
-    floatingIP?: string,
 }
 
 export interface CloudflareConfig {
@@ -35,6 +34,7 @@ const cf = new cloudflare.Provider("cloudflare", {
     apiToken: cloudflareCfg.token,
 });
 
+const floatingIP = config.require("floatingIP");
 const parentDomain = config.require("parentDomain");
 const parentZone = cloudflare.getZoneOutput({
     name: parentDomain,
@@ -107,7 +107,7 @@ const clusterNodes = nodeConfig.map((node) => {
         zoneId: parentZone.zoneId,
         machineConfiguration: controlPlaneConfig,
         zone: node.zone,
-        floatingIP: node.floatingIP,
+        floatingIP,
     }, { providers: {
         cloudflare: cf,
     } });
@@ -163,6 +163,33 @@ const kube = new k8s.Provider("k8s", {
     kubeconfig: bootstrapKubeConfig,
 });
 
+// Networking setup
+const cilium = networking.installCni("cilium", {
+    version: "1.16.4",
+    floatingIPs: [floatingIP],
+    nodeIPs: clusterNodes.map(n => pulumi.interpolate`${n.ip}/32`),
+}, { provider: kube });
+const firewall = networking.createControlPlaneHostFirewall("host-fw-control-plane", clusterNodes.map(n => n.ip), {
+    provider: kube,
+    dependsOn: cilium,
+});
+
+const ingress = networking.installIngress("ingress-nginx", {
+    version: "4.11.3",
+    externalIps: clusterNodes.map(n => n.ip),
+}, {
+    provider: kube,
+    dependsOn: [cilium, firewall]
+});
+
+// Metrics server to enable Autoscaling & Monitoring CRDs
+const metricsServer = new metrics.MetricsServer("metrics-server", {
+    version: "v3.12.2",
+}, {
+    providers: [kube],
+    dependsOn: [cilium],
+});
+
 const crdUrls = [
     "monitoring.coreos.com_servicemonitors.yaml",
     "monitoring.coreos.com_podmonitors.yaml", 
@@ -175,23 +202,7 @@ const promCRDs = crdUrls.map((url, index) => {
     }, { provider: kube });
 });
 
-const cilium = networking.installCni("cilium", {
-    version: "1.16.4",
-    floatingIPs: [...new Set(nodeConfig.map(n => n.floatingIP).filter(x => x !== undefined))],
-    nodeIPs: clusterNodes.map(n => pulumi.interpolate`${n.ip}/32`),
-}, { provider: kube });
-const firewall = networking.createControlPlaneHostFirewall("host-fw-control-plane", clusterNodes.map(n => n.ip), {
-    provider: kube,
-    dependsOn: cilium,
-});
-
-const metricsServer = new metrics.MetricsServer("metrics-server", {
-    version: "v3.12.2",
-}, {
-    providers: [kube],
-    dependsOn: [cilium],
-});
-
+// Storage setup
 const rookCeph = new storage.RookCeph("rook-ceph", {
     version: "v1.15.6",
     cephVersion: "v19.2.0",
@@ -204,6 +215,30 @@ export const fileStorageClass = rookCeph.fileStorageClass.metadata.name;
 export const objectStore = rookCeph.objectStore.metadata.name;
 export const bucketStorageClass = rookCeph.bucketStorageClass.metadata.name;
 
+// DNS & Cert setup
+const externalDns = new dns.ExternalDns("external-dns", {
+    version: "1.15.0",
+    cloudflareAccountId: cloudflareCfg.account,
+    clusterName,
+    parentDomains: [parentDomain],
+}, {
+    providers: [cf, kube],
+    dependsOn: [cilium, firewall, ...promCRDs],
+});
+
+const certManager = new dns.CertManager("cert-manager", {
+    version: "1.16.2",
+    contact: "flo.stadler@gmx.net",
+    ingressClass: "nginx",
+}, {
+    providers: [kube],
+    dependsOn: [ingress],
+});
+
+export const prodCertIssuer = certManager.prodIssuer.metadata.name;
+
+
+// Pulumi Operator
 const pulumiOperatorVersion = config.require("pulumiOperatorVersion");
 const pulOperator = pulumiOperator.createOperator(pulumiOperatorVersion, {
     provider: kube,
@@ -260,32 +295,3 @@ const stackOfStacks = new k8s.apiextensions.CustomResource("stack-of-stacks", {
         destroyOnFinalize: true,
     }
 }, { provider: kube, dependsOn: [pulOperator] });
-
-const ingress = networking.installIngress("ingress-nginx", {
-    version: "4.11.3",
-    externalIps: clusterNodes.map(n => n.ip),
-}, {
-    provider: kube,
-    dependsOn: [cilium, firewall]
-});
-
-const externalDns = new dns.ExternalDns("external-dns", {
-    version: "1.15.0",
-    cloudflareAccountId: cloudflareCfg.account,
-    clusterName,
-    parentDomains: [parentDomain],
-}, {
-    providers: [cf, kube],
-    dependsOn: [cilium, firewall, ...promCRDs],
-});
-
-const certManager = new dns.CertManager("cert-manager", {
-    version: "1.16.2",
-    contact: "flo.stadler@gmx.net",
-    ingressClass: "nginx",
-}, {
-    providers: [kube],
-    dependsOn: [ingress],
-});
-
-export const prodCertIssuer = certManager.prodIssuer.metadata.name;

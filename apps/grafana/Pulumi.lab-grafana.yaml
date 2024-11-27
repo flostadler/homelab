@@ -1,5 +1,2 @@
-config:
-  lab-grafana:oidcClientSecret:
-    secure: AAABAHUynWBfTTT9aS+3ddhXYykvuNrrSbgPHzfPLBtcml1kz1zjB7l0gxC9DCgXnzcvzqhcZH3k+XLTYPBX2q6AkwK4TCT+
-  lab-grafana:oidcClientId:
-    secure: AAABAKaJPthYLH+Jdr8izomESQVk8QlgzNsEQWvMmSc56gi7bFcxVIO1yKG2DnOTmOtYMQ==
+environment:
+  - homelab/monitoring
