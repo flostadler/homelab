@@ -293,5 +293,6 @@ const stackOfStacks = new k8s.apiextensions.CustomResource("stack-of-stacks", {
         resyncFrequencySeconds: 60,
         accessTokenSecret,
         destroyOnFinalize: true,
+        continueResyncOnCommitMatch: true,
     }
 }, { provider: kube, dependsOn: [pulOperator] });
